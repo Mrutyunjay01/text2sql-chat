@@ -1,0 +1,7 @@
+openai==3.21.0
+fastapi==0.141.1
+uvicorn[standard]==0.54.0
+psycopg[binary]==3.3.6
+psycopg-pool==3.3.3
+sqlglot==30.20.0
+pytest==9.1.1

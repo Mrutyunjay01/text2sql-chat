@@ -1,0 +1,66 @@
+name: synthio
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-chinook}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # Must not be "chinook": the seed script drops and recreates that database itself.
+      POSTGRES_DB: postgres
+      CHINOOK_RO_USER: ${CHINOOK_RO_USER:-chinook_ro}
+      CHINOOK_RO_PASSWORD: ${CHINOOK_RO_PASSWORD:?set CHINOOK_RO_PASSWORD in .env}
+    volumes:
+      # Only the base script: the other Postgres variants each DROP/CREATE the same database.
+      - ./chinook-database/ChinookDatabase/DataSources/Chinook_PostgreSql.sql:/docker-entrypoint-initdb.d/01_chinook.sql:ro
+      - ./db/init/02_readonly_role.sh:/docker-entrypoint-initdb.d/02_readonly_role.sh:ro
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # Healthy only once the seed has finished and the read-only role exists.
+      test: ["CMD-SHELL", "psql -U $$POSTGRES_USER -d chinook -tAc \"SELECT 1 FROM pg_roles WHERE rolname = '$$CHINOOK_RO_USER'\" | grep -q 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks: [chinook_net]
+
+  api:
+    build: ./api
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?set OPENAI_API_KEY in .env}
+      GATE_MODEL: ${GATE_MODEL:-gpt-6-luna}
+      PLANNER_MODEL: ${PLANNER_MODEL:-gpt-6.1-sol}
+      ANSWER_MODEL: ${ANSWER_MODEL:-gpt-6-luna}
+      GATE_EFFORT: ${GATE_EFFORT:-low}
+      PLANNER_EFFORT: ${PLANNER_EFFORT:-medium}
+      ANSWER_EFFORT: ${ANSWER_EFFORT:-low}
+      EXPOSE_SQL: ${EXPOSE_SQL:-false}
+      CHINOOK_RO_USER: ${CHINOOK_RO_USER:-chinook_ro}
+      CHINOOK_RO_PASSWORD: ${CHINOOK_RO_PASSWORD}
+      DB_HOST: db
+      DB_NAME: chinook
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [chinook_net]
+
+  ui:
+    build: ./ui
+    environment:
+      API_URL: http://api:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [chinook_net]
+
+volumes:
+  pgdata:
+
+networks:
+  chinook_net:
